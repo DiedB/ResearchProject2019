@@ -198,26 +198,3 @@ def generateBgpFlowspecRules(fingerprint, maxComplexity, maxRuleAmount):
             flowspecRules.append(currentFlowspecRule)
 
     return flowspecRules
-
-def readFingerprint(path):
-    with open(path, 'r') as f:
-        fingerprint = json.load(f)
-        return fingerprint
-
-# Parameters
-ddosDbDatasetPath = '../../dataset/final'
-fingerprintId = '17148f16c77d291cfa9e5fb7e4e3ac43'
-
-maxComplexity = 20
-maxRuleAmount = 300
-
-# Run the generator
-fingerprintPath = ddosDbDatasetPath + '/' + fingerprintId + '.json'
-flowspecRules = generateBgpFlowspecRules(readFingerprint(fingerprintPath), maxComplexity, maxRuleAmount)
-
-print('Generated ' + str(len(flowspecRules)) + ' candidate BGP Flowspec rules for fingerprint ' + fingerprintId)
-
-# Write the generated ruleset
-f = open(ddosDbDatasetPath + '/' + fingerprintId + '.bgp.json', 'w+')
-f.write(json.dumps(flowspecRules))
-f.close()

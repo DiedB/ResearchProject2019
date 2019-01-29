@@ -4,6 +4,7 @@ import tempfile
 import subprocess
 import pandas as pd
 import math
+import ipaddress
 from progress.bar import Bar
 from shared import calculateComplexity
 
@@ -15,7 +16,7 @@ def convertPcapToDataFrame(input_file):
                     "-e _ws.col.Source " \
                     "-e _ws.col.Length " \
                     "-e ip.proto " \
-                    "-e ip.src_host " \
+                    "-e ip.src " \
                     "-e udp.dstport " \
                     "-e tcp.dstport " \
                     "-e udp.srcport " \
@@ -72,10 +73,10 @@ def areEqual(arr1, arr2):
 
 # Read Type 2 value
 def compareIpAddresses(packetTraceSrcIp, bgpFlowspecSrcIp):
-    print(packetTraceSrcIp)
-    print(type(packetTraceSrcIp))
-    
-    return true
+    network = ipaddress.ip_network(bgpFlowspecSrcIp)
+    network2 = ipaddress.ip_network(packetTraceSrcIp + '/32')
+
+    return network2.subnet_of(network)
 
 # Read Type 3 value
 def compareProtocols(packetTraceProtocol, bgpFlowspecProtocols):
@@ -173,7 +174,7 @@ def calculateEffectiveness(df, bgpFlowspecRule):
     matchingVolume = 0
     totalVolume = 0
 
-    bar = Bar('Calculating effectiveness...', max = len(df.index))
+    bar = Bar('Calculating rule effectiveness...', max = len(df.index))
     # Iterate over PCAP dataframe
     for _, row in df.iterrows():
         bar.next()
@@ -187,7 +188,7 @@ def calculateEffectiveness(df, bgpFlowspecRule):
         if compareProtocols(row.get('ip.proto'), bgpFlowspecRule['type3']):
 
             # Compare IP addresses
-            if compareIpAddresses(row.get('ip.src_host'), bgpFlowspecRule['type2']):
+            if compareIpAddresses(row.get('ip.src'), bgpFlowspecRule['type2']):
                 
                 # ICMP-specific
                 if 1 in bgpFlowspecRule['type3']:
@@ -212,7 +213,7 @@ def calculateEffectiveness(df, bgpFlowspecRule):
                         if (not ('type6' in bgpFlowspecRule)) or comparePorts(row.get('tcp.srcport'), bgpFlowspecRule['type6']):
                             matchesFlowspecRule = True
 
-                # Todo: UDP-specfic (UDP, SSDP, QUIC)
+                # UDP-specfic (UDP, SSDP, QUIC)
                 if 17 in bgpFlowspecRule['type3']:
 
                     # Compare Type 5 (destination port, OR)
@@ -223,17 +224,12 @@ def calculateEffectiveness(df, bgpFlowspecRule):
                             matchesFlowspecRule = True
 
         if matchesFlowspecRule:
-            matchingPackets += 1
-            matchingSize += packetLength
+            matchingVolume += packetLength
 
     bar.finish()
 
     return matchingVolume / totalVolume
 
-def readRuleset(path):
-    with open(path, 'r') as f:
-        ruleset = json.load(f)
-        return ruleset
 
 def readPcap(path):
     dataFrame = None
@@ -245,23 +241,20 @@ def readPcap(path):
     finally:
         return dataFrame
 
-def calculateImpactQuantification(rulesetPath, ddosPacketTracePath, realPacketTracePath, complexityWeight, effectivenessWeight, endUserImpactWeight, maxComplexity):
-    bgpFlowspecRuleset = readRuleset(rulesetPath)
 
+def calculateImpactQuantification(baseEndUserImpact, bgpFlowspecRuleset, ddosPacketTracePath, realPacketTracePath, prefixLengthWeight, complexityWeight, effectivenessWeight, endUserImpactWeight, maxComplexity):
     print('Initializing PCAP dataframes...')
     ddosPacketTraceDf = readPcap(ddosPacketTracePath)
     print('DDoS packet trace has been loaded')
-    realPacketTraceDf = readPcap(realPacketTracePath)
-    print('bigFlows has been loaded')
 
-    # baseEndUserImpact = calculateEndUserImpact(realPacketTraceDf, bgpFlowspecRuleset[0])
-    baseEndUserImpact = 3
+    impactQuantificationResults = []
+
     for bgpFlowspecRule in bgpFlowspecRuleset:
-        
-        ruleEffectiveness = calculateEffectiveness(ddosPacketTraceDf, bgpFlowspecRuleset)
+        currentImpactQuantificationResult = {}
+
+        ruleEffectiveness = calculateEffectiveness(ddosPacketTraceDf, bgpFlowspecRule)
         ruleComplexity = calculateComplexity(bgpFlowspecRule) / maxComplexity
 
-        prefixLengthWeight = -15
         rulePrefixLength = int(bgpFlowspecRule['type2'].split('/')[1])
         rulePrefixLengthFactor = prefixLengthWeight * ((math.pow(2, 32 - rulePrefixLength) - 1) / math.pow(2, 32))
 
@@ -269,17 +262,18 @@ def calculateImpactQuantification(rulesetPath, ddosPacketTracePath, realPacketTr
         ruleEffectiveness = ruleEffectiveness - rulePrefixLengthFactor
         ruleEndUserImpact = baseEndUserImpact + rulePrefixLengthFactor
 
-        impactQuantification = (complexityWeight * ruleComplexity) + (effectivenessWeight * ruleEffectiveness) + (endUserImpactWeight * ruleEndUserImpact)
-        print('Rule ' + str(bgpFlowspecRule['index']) + ': C=' + str(ruleComplexity) + ', E=' + str(ruleEffectiveness) + ', I=' + str(ruleEndUserImpact)+ ', Q=' + str(impactQuantification))
+        # impactQuantification = (complexityWeight * ruleComplexity) + (effectivenessWeight * ruleEffectiveness) + (endUserImpactWeight * ruleEndUserImpact)
+        # print('Rule ' + str(bgpFlowspecRule['index']) + ': C=' + str(ruleComplexity) + ': PLF=' + str(rulePrefixLengthFactor) + ', E=' + str(ruleEffectiveness) + ', I=' + str(ruleEndUserImpact)+ ', Q=' + str(impactQuantification))
+
+        currentImpactQuantificationResult['ruleDefinition'] = bgpFlowspecRule
+        impactFactors = {}
+
+        impactFactors['c'] = ruleComplexity
+        impactFactors['plf'] = rulePrefixLengthFactor
+        impactFactors['e'] = ruleEffectiveness
+        impactFactors['i'] = ruleEndUserImpact
+
+        currentImpactQuantificationResult['impactFactors'] = impactFactors.copy()
+        impactQuantificationResults.append(currentImpactQuantificationResult.copy())
         
-# Parameters
-ddosDbDatasetPath = '../../dataset/final'
-fingerprintId = '17148f16c77d291cfa9e5fb7e4e3ac43'
-maxComplexity = 20
-
-rulesetPath = ddosDbDatasetPath + '/' + fingerprintId + '.bgp.json'
-ddosPacketTracePath = ddosDbDatasetPath + '/' + fingerprintId
-realPacketTracePath = 'bigFlows'
-
-# Run impact calculator on given packetTrace and BGP Flowspec Ruleset
-calculateImpactQuantification(rulesetPath, ddosPacketTracePath, realPacketTracePath, -2, 7, -11, maxComplexity)
+    return impactQuantificationResults
