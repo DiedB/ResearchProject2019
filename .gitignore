@@ -1,4 +1,3 @@
 .vscode/
 __pycache__/
-bigFlows.pcap
-bigFlows.pkl
+.DS_Store
