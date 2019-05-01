@@ -61,13 +61,15 @@ def getTcpFlag(fingerprintTcpFlag):
 # Rule generator
 def main():
     fingerprint = None
+    destinationIp = None
 
     # Read the fingerprint file
-    if (len(sys.argv) == 2):
+    if (len(sys.argv) == 3):
         f = open(sys.argv[1], 'r')
         fingerprint = json.loads(f.read())
+        destinationIp = sys.argv[2]
     else:
-        raise ValueError('Please supply a fingerprint file path as argument')
+        raise ValueError('Please supply a fingerprint file path and a destination IP as argument')
 
     # Resulting array
     flowspecRules = []
@@ -76,8 +78,7 @@ def main():
     baseFlowspecRule = {}
 
     # Collect Type 1 (Destination IP)
-    # TODO: Add actual destination address
-    baseFlowspecRule['type1'] = None
+    baseFlowspecRule['type1'] = '{}/32'.format(destinationIp)
 
     # Type 2 will be dynamically generated and added to the resulting ruleset later
     # TODO: Create (weighted) algorithm for reducing fingerprint source IPs into prefixes
